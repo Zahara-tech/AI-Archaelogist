@@ -1,0 +1,73 @@
+{
+  "camera_id": "CAM-STATION-04-OVERHEAD",
+  "fps": 30,
+  "resolution": "1920x1080",
+  "start_time": "2026-03-15 10:00:00",
+  "duration_seconds": 600,
+  "detections": [
+    {
+      "timestamp": "2026-03-15 10:00:05",
+      "event_type": "operator_present",
+      "object_class": "person",
+      "region": "loading_bay",
+      "confidence": 0.96,
+      "description": "Operator OP-302 loading workpiece fixture."
+    },
+    {
+      "timestamp": "2026-03-15 10:00:45",
+      "event_type": "operator_exit",
+      "object_class": "person",
+      "region": "safety_perimeter",
+      "confidence": 0.94,
+      "description": "Operator exits safety enclosure and closes door."
+    },
+    {
+      "timestamp": "2026-03-15 10:01:30",
+      "event_type": "spindle_rotation_visible",
+      "object_class": "machine_spindle",
+      "region": "work_chamber",
+      "confidence": 0.92,
+      "description": "Spindle rotation detected, machining in progress."
+    },
+    {
+      "timestamp": "2026-03-15 10:04:16",
+      "event_type": "beacon_alarm_flashing",
+      "object_class": "stack_light",
+      "region": "machine_top",
+      "confidence": 0.98,
+      "description": "Stack light switched from green to flashing red/yellow alarm."
+    },
+    {
+      "timestamp": "2026-03-15 10:04:35",
+      "event_type": "operator_approaching",
+      "object_class": "person",
+      "region": "station_approach",
+      "confidence": 0.95,
+      "description": "Operator entering workstation safety perimeter."
+    },
+    {
+      "timestamp": "2026-03-15 10:04:51",
+      "event_type": "safety_door_opened",
+      "object_class": "enclosure_door",
+      "region": "machine_front",
+      "confidence": 0.97,
+      "description": "Visual confirmation: Enclosure door opened by operator."
+    },
+    {
+      "timestamp": "2026-03-15 10:05:15",
+      "event_type": "operator_inspection_action",
+      "object_class": "person",
+      "region": "work_chamber",
+      "confidence": 0.88,
+      "description": "Operator leaning into work chamber, visual check of toolholder."
+    },
+    {
+      "timestamp": "2026-03-15 10:06:15",
+      "event_type": "maintenance_technician_arrived",
+      "object_class": "person",
+      "region": "control_console",
+      "confidence": 0.93,
+      "description": "Second person (wearing high-vis maintenance vest) arrives at console."
+    }
+  ]
+}

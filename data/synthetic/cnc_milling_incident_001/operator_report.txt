@@ -1,0 +1,13 @@
+INCIDENT REPORT - PRODUCTION SHIFT 1
+Date: 2026-03-15
+Author: John Miller (Operator Badge #OP-302)
+Cell: Station 04 - CNC Precision Milling
+Workpiece ID: AERO-BLADE-TURBINE-X79-8842
+
+Statement:
+I was operating Station 4 during the morning run. We were profiling the aero turbine blade (batch TB-8842). 
+Around 10:03 AM, I noticed an unusual high-pitched whining noise from the spindle enclosure. Shortly after, the yellow beacon began blinking and coolant vapor started appearing through the viewing glass.
+
+At approximately 10:04:15, the machine triggered an emergency stop and made a loud grinding chatter. I immediately rushed to the station, pressed the physical emergency flush button, and opened the safety enclosure door around 10:04:50 to check for fire or tool breakage. I observed smoke and severe burn discoloration on the toolholder.
+
+Between 10:05 and 10:06, I performed a quick visual inspection of the internal cutting chamber, verified no active flame, and reset the main panel breaker while calling maintenance on the radio. The workpiece blade surface had severe thermal gouges. Technician Dave arrived around 10:06.

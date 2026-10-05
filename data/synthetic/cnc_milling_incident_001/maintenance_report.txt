@@ -1,0 +1,16 @@
+MAINTENANCE INCIDENT INVESTIGATION LOG
+Incident Ref: MNT-INC-2026-088
+Date: 2026-03-15
+Technician: Dave Vance (Sr. Reliability Engineer, Badge #MNT-109)
+Machine: CNC-MILL-04 (DMG Mori 5-Axis)
+
+Initial Findings:
+Dispatched to Station 4 at 10:05:30 following radio call from operator John Miller. Arrived at station at 10:06:15.
+Connected diagnostic laptop to PLC interface at 10:06:20.
+
+Observations:
+1. Spindle ceramic bearing pack seized due to severe thermal expansion. Peak bearing temperature estimated >90°C.
+2. Coolant solenoid valve SOL-22 was stuck in 20% partially-closed position due to chip contamination in return filter, starving the flood coolant nozzles during high-speed trochoidal milling.
+3. Carbide end mill (T04, 12mm 5-flute) experienced micro-welding onto Inconel workpiece, causing catastrophic chatter at 10:04:10 before the thermal watchdog triggered at 10:04:15.
+4. Physical inspection of enclosure confirms operator opened door at ~10:04:51 and inspected spindle chamber before my arrival.
+5. Workpiece TB-8842 sustained deep gouge defects (>1.8mm depth) beyond rework limits. Workpiece condemned to scrap.

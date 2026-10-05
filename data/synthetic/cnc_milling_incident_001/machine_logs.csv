@@ -1,0 +1,11 @@
+timestamp,machine_id,event_code,description
+2026-03-15 10:00:00,CNC-MILL-04,SYS_001_INIT,Part clamp confirmed. CNC cycle initiated in AUTO mode.
+2026-03-15 10:01:30,CNC-MILL-04,SPINDLE_SPINUP,Spindle reached target speed 12000 RPM. Tool T04 engaged.
+2026-03-15 10:03:15,CNC-MILL-04,WRN_COOLANT_FLOW,Warning: Coolant flow sensor FL-102 below nominal lower limit (1.1 bar).
+2026-03-15 10:03:42,CNC-MILL-04,WRN_TEMP_HIGH,Spindle bearing thermocouple TC-01 exceeded caution threshold 70.0 C.
+2026-03-15 10:04:10,CNC-MILL-04,ALM_VIB_EXCESSIVE,Spindle vibration accelerometer ACC-02 exceeded safety limit (6.4 mm/s).
+2026-03-15 10:04:15,CNC-MILL-04,ERR_E07_THERMAL_SEIZE,Emergency shutdown executed by PLC watchdog: Spindle bearing thermal expansion trip.
+2026-03-15 10:04:51,CNC-MILL-04,INTERLOCK_DOOR_OPEN,Front safety enclosure interlock opened manually.
+2026-03-15 10:05:02,CNC-MILL-04,HMI_ACK_FAULT,Operator HMI acknowledged error code ERR_E07.
+2026-03-15 10:06:20,CNC-MILL-04,MNT_DIAG_START,Maintenance diagnostic key activated. PLC transitioned to MAINTENANCE_HOLD.
+2026-03-15 10:08:10,CNC-MILL-04,SYS_PART_EJECT,Part clamp released. Workpiece marked SCRAP by QA supervisor.
