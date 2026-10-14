@@ -11,7 +11,8 @@ import type {
   InvestigationSummaryResponse
 } from '../types';
 
-const API_BASE = 'http://localhost:8000/api/v1';
+// Use Vite proxy in development, direct URL in production
+const API_BASE = import.meta.env.PROD ? '/api/v1' : '/api/v1';
 
 export const api = {
   // Incidents
@@ -150,6 +151,72 @@ export const api = {
       body: formData,
     });
     if (!res.ok) throw new Error('Failed to upload evidence');
+    return res.json();
+  },
+
+  // Benchmark Neural Reconstruction
+  listBenchmarkWindows: async (): Promise<{ windows: Array<{ filename: string; window_count: number; context_shape: number[]; target_shape: number[] }> }> => {
+    const res = await fetch(`${API_BASE}/sensor/benchmark/windows`);
+    if (!res.ok) throw new Error('Failed to list benchmark windows');
+    return res.json();
+  },
+
+  reconstructBenchmarkWindow: async (filename: string, windowIndex: number): Promise<{
+    filename: string;
+    window_index: number;
+    neural_predictions: number[][];
+    baseline_predictions: number[][];
+    ground_truth: number[][];
+    neural_metrics: { mse: number; mae: number; rmse: number; per_sensor_mse: number[] };
+    baseline_metrics: { mse: number; mae: number; rmse: number; per_sensor_mse: number[] };
+    better_method: string;
+    sensor_columns: string[];
+  }> => {
+    const res = await fetch(`${API_BASE}/sensor/benchmark/reconstruct-window`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename, window_index: windowIndex }),
+    });
+    if (!res.ok) throw new Error('Failed to reconstruct benchmark window');
+    return res.json();
+  },
+
+  // Evaluation metrics
+  getEvaluationMetrics: async (): Promise<{
+    model_name: string;
+    test_mse: number | null;
+    test_mae: number | null;
+    baseline_mse: number | null;
+    baseline_mae: number | null;
+    test_sequences: number | null;
+    test_files: number | null;
+    per_sensor_mse: number[] | null;
+    per_sensor_mae: number[] | null;
+    training_history?: any;
+  }> => {
+    const res = await fetch(`${API_BASE}/sensor/model/evaluation-metrics`);
+    if (!res.ok) throw new Error('Failed to fetch evaluation metrics');
+    return res.json();
+  },
+
+  getEvaluationDetails: async (): Promise<any> => {
+    const res = await fetch(`${API_BASE}/sensor/model/evaluation-details`);
+    if (!res.ok) throw new Error('Failed to fetch evaluation details');
+    return res.json();
+  },
+
+  getResidualData: async (limit: number = 10000): Promise<{
+    sample_count: number;
+    total_samples: number;
+    targets: number[][];
+    baseline_predictions: number[][];
+    attention_predictions: number[][];
+    baseline_residuals: number[][];
+    attention_residuals: number[][];
+    sensor_columns: string[];
+  }> => {
+    const res = await fetch(`${API_BASE}/sensor/model/residual-data?limit=${limit}`);
+    if (!res.ok) throw new Error('Failed to fetch residual data');
     return res.json();
   },
 };

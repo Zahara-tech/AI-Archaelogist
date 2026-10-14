@@ -7,7 +7,11 @@ and modular service endpoints.
 from typing import List
 from pydantic_settings import BaseSettings
 from pydantic import Field
+from pathlib import Path
 import os
+
+# Get project root (3 levels up from this file)
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "AI Archaeologist"
@@ -16,7 +20,7 @@ class Settings(BaseSettings):
     
     # Database: Uses SQLite by default for zero-setup execution, PostgreSQL when DATABASE_URL is configured
     DATABASE_URL: str = Field(
-        default="sqlite:///./ai_archaeologist.db",
+        default=f"sqlite:///{PROJECT_ROOT / 'ai_archaeologist.db'}",
         description="Database connection string (sqlite:///... or postgresql+psycopg2://user:pass@localhost:5432/ai_archaeologist)"
     )
     

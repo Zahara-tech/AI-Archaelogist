@@ -1,12 +1,10 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
-  LayoutDashboard, 
-  FileText, 
-  FolderOpen, 
-  Clock, 
-  GitBranch, 
-  FlaskConical,
+  Database, 
+  FlaskConical, 
+  Cpu, 
+  BarChart3,
   Activity
 } from 'lucide-react';
 
@@ -14,12 +12,10 @@ export const Sidebar: React.FC = () => {
   const location = useLocation();
 
   const navItems = [
-    { path: '/', label: 'Overview', icon: LayoutDashboard },
-    { path: '/incidents', label: 'Incidents', icon: FileText },
-    { path: '/evidence', label: 'Evidence', icon: FolderOpen },
-    { path: '/timeline', label: 'Timeline', icon: Clock },
-    { path: '/reconstruction', label: 'Reconstruction', icon: GitBranch },
-    { path: '/experiments', label: 'Experiments', icon: FlaskConical },
+    { path: '/dataset-explorer', label: 'Dataset Explorer', icon: Database },
+    { path: '/reconstruction-lab', label: 'Reconstruction Lab', icon: FlaskConical },
+    { path: '/model-performance', label: 'Model Performance', icon: Cpu },
+    { path: '/experiments', label: 'Experiments & Results', icon: BarChart3 },
   ];
 
   const isActive = (path: string) => location.pathname === path;
@@ -55,7 +51,7 @@ export const Sidebar: React.FC = () => {
           color: 'var(--text-muted)',
           fontWeight: 500
         }}>
-          Evidence-Based Industrial Incident Reconstruction
+          Industrial Sensor Reconstruction Research
         </p>
       </div>
 

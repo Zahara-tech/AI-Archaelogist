@@ -14,6 +14,8 @@ from app.api.v1.timeline import router as timeline_router
 from app.api.v1.reconstruction import router as reconstruction_router
 from app.api.v1.evidence import router as evidence_router
 from app.api.v1.graph import router as graph_router
+from app.api.v1.model import router as model_router
+from app.api.v1.sensor import router as sensor_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -45,6 +47,8 @@ app.include_router(timeline_router, prefix=settings.API_V1_STR)
 app.include_router(reconstruction_router, prefix=settings.API_V1_STR)
 app.include_router(evidence_router, prefix=settings.API_V1_STR)
 app.include_router(graph_router, prefix=settings.API_V1_STR)
+app.include_router(model_router, prefix=settings.API_V1_STR)
+app.include_router(sensor_router, prefix=settings.API_V1_STR)
 
 @app.get("/")
 def root():
