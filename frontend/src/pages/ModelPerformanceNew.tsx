@@ -286,7 +286,7 @@ export const ModelPerformanceNew: React.FC = () => {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="method" />
                 <YAxis label="MSE (×1000)" />
-                <Tooltip formatter={(value) => [(value / 1000).toFixed(6), 'MSE']} />
+                <Tooltip formatter={(value: any) => [((Number(value) || 0) / 1000).toFixed(6), 'MSE']} />
                 <Bar dataKey="MSE" fill="#3b82f6" />
               </BarChart>
             </ResponsiveContainer>
@@ -305,7 +305,7 @@ export const ModelPerformanceNew: React.FC = () => {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="method" />
                 <YAxis label="MAE (×100)" />
-                <Tooltip formatter={(value) => [(value / 100).toFixed(4), 'MAE']} />
+                <Tooltip formatter={(value: any) => [((Number(value) || 0) / 100).toFixed(4), 'MAE']} />
                 <Bar dataKey="MAE" fill="#10b981" />
               </BarChart>
             </ResponsiveContainer>
@@ -324,7 +324,7 @@ export const ModelPerformanceNew: React.FC = () => {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="method" />
                 <YAxis label="RMSE (×100)" />
-                <Tooltip formatter={(value) => [(value / 100).toFixed(4), 'RMSE']} />
+                <Tooltip formatter={(value: any) => [((Number(value) || 0) / 100).toFixed(4), 'RMSE']} />
                 <Bar dataKey="RMSE" fill="#f59e0b" />
               </BarChart>
             </ResponsiveContainer>
@@ -343,7 +343,7 @@ export const ModelPerformanceNew: React.FC = () => {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="method" />
                 <YAxis label="Time (ms)" />
-                <Tooltip formatter={(value) => [`${value.toFixed(1)} ms`, 'Inference Time']} />
+                <Tooltip formatter={(value: any) => [`${(Number(value) || 0).toFixed(1)} ms`, 'Inference Time']} />
                 <Bar dataKey="time" fill="#8b5cf6" />
               </BarChart>
             </ResponsiveContainer>
@@ -362,7 +362,7 @@ export const ModelPerformanceNew: React.FC = () => {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="gap" />
                 <YAxis label="MSE (×1000)" />
-                <Tooltip formatter={(value) => [(value / 1000).toFixed(6), 'MSE']} />
+                <Tooltip formatter={(value: any) => [((Number(value) || 0) / 1000).toFixed(6), 'MSE']} />
                 <Legend />
                 <Line type="monotone" dataKey="linear" stroke="#3b82f6" strokeWidth={2} name="Linear Interpolation" />
                 <Line type="monotone" dataKey="residual" stroke="#f97316" strokeWidth={2} name="Residual LSTM" />
@@ -402,6 +402,5 @@ export const ModelPerformanceNew: React.FC = () => {
           </div>
         </div>
       </div>
-    </div>
   );
 };

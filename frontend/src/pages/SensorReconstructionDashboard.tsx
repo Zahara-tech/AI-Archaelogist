@@ -1145,6 +1145,5 @@ export const SensorReconstructionDashboard: React.FC = () => {
           </div>
         )}
       </div>
-    </div>
   );
 };

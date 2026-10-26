@@ -312,7 +312,7 @@ export const Experiments: React.FC = () => {
                       borderRadius: '8px',
                       color: 'var(--text-primary)'
                     }}
-                    formatter={(value: number) => `${value.toFixed(1)}%`}
+                    formatter={(value: any) => `${Number(value || 0).toFixed(1)}%`}
                   />
                   <Legend />
                   <Bar dataKey="baseline" name="Linear Interpolation" fill="#3b82f6" />

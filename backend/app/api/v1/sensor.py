@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 from pydantic import BaseModel
 import json
+import time
 
 from app.services.model_service import model_service
 from app.schemas.sensor import (
@@ -75,6 +76,9 @@ class BenchmarkReconstructionResponse(BaseModel):
     ground_truth: List[List[float]]
     metrics: MetricsResponse
     sensor_columns: List[str]
+    context_before: Optional[List[List[float]]] = None
+    context_after: Optional[List[List[float]]] = None
+    inference_time_ms: Optional[float] = None
 
 
 class DatasetInfoResponse(BaseModel):
@@ -474,7 +478,9 @@ class GapBenchmarkWindowRequest(BaseModel):
     gap_length: int
     filename: str
     window_index: int
-    method: str = "linear_interpolation"  # "linear_interpolation", "residual_lstm"
+    method: str = "linear_interpolation"  # "linear_interpolation", "attention_seq2seq", "residual_lstm", "hybrid"
+    context_before: Optional[int] = None
+    context_after: Optional[int] = None
 
 
 class GapBenchmarkReconstructionResponse(BaseModel):
@@ -486,6 +492,31 @@ class GapBenchmarkReconstructionResponse(BaseModel):
     ground_truth: List[List[float]]
     metrics: MetricsResponse
     sensor_columns: List[str]
+    context_before: Optional[List[List[float]]] = None
+    context_after: Optional[List[List[float]]] = None
+    inference_time_ms: Optional[float] = None
+
+
+class CompareMethodResult(BaseModel):
+    method: str
+    name: str
+    available: bool
+    status_message: str
+    predictions: Optional[List[List[float]]] = None
+    metrics: Optional[MetricsResponse] = None
+    inference_time_ms: Optional[float] = None
+
+
+class CompareAllResponse(BaseModel):
+    gap_length: int
+    filename: str
+    window_index: int
+    context_before: List[List[float]]
+    context_after: List[List[float]]
+    ground_truth: List[List[float]]
+    sensor_columns: List[str]
+    methods: Dict[str, CompareMethodResult]
+    best_method: Optional[str] = None
 
 
 @router.get("/gap-benchmark/info")
@@ -600,18 +631,20 @@ def reconstruct_gap_benchmark_window(request: GapBenchmarkWindowRequest):
             )
         
         # Extract window data (already normalized)
-        context_before = data["context_before"][request.window_index]
-        context_after = data["context_after"][request.window_index]
+        full_context_before = data["context_before"][request.window_index]
+        full_context_after = data["context_after"][request.window_index]
         target = data["masked_segment"][request.window_index]
         
-        # Run reconstruction
+        # Run reconstruction with timing
+        t0 = time.perf_counter()
         result = model_service.reconstruct(
-            context_before,
-            context_after,
+            full_context_before,
+            full_context_after,
             already_normalized=True,
             method=request.method,
             gap_length=request.gap_length
         )
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
         
         if result["status"] != "success":
             raise HTTPException(status_code=500, detail=result["error"])
@@ -621,6 +654,15 @@ def reconstruct_gap_benchmark_window(request: GapBenchmarkWindowRequest):
         # Calculate metrics
         metrics = calculate_metrics(predictions, target)
         
+        # Slice contexts for requested view window if specified
+        cb_out = full_context_before
+        if request.context_before and 0 < request.context_before <= len(full_context_before):
+            cb_out = full_context_before[-request.context_before:]
+            
+        ca_out = full_context_after
+        if request.context_after and 0 < request.context_after <= len(full_context_after):
+            ca_out = full_context_after[:request.context_after]
+        
         return GapBenchmarkReconstructionResponse(
             gap_length=request.gap_length,
             filename=request.filename,
@@ -629,9 +671,137 @@ def reconstruct_gap_benchmark_window(request: GapBenchmarkWindowRequest):
             predictions=predictions.tolist(),
             ground_truth=target.tolist(),
             metrics=MetricsResponse(**metrics),
-            sensor_columns=SENSOR_COLUMNS
+            sensor_columns=SENSOR_COLUMNS,
+            context_before=cb_out.tolist(),
+            context_after=ca_out.tolist(),
+            inference_time_ms=round(elapsed_ms, 2)
         )
         
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/gap-benchmark/compare-all", response_model=CompareAllResponse)
+def compare_all_gap_methods(request: GapBenchmarkWindowRequest):
+    """Compare all four reconstruction methods on the exact same sample."""
+    try:
+        gap_dir = GAP_BENCHMARK_BASE / f"gap_{request.gap_length}"
+        if not gap_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Gap length {request.gap_length} not found")
+        
+        file_path = gap_dir / request.filename
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"File {request.filename} not found")
+        
+        data = np.load(file_path)
+        window_count = len(data["context_before"])
+        if request.window_index < 0 or request.window_index >= window_count:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Window index {request.window_index} out of range [0, {window_count})"
+            )
+        
+        full_context_before = data["context_before"][request.window_index]
+        full_context_after = data["context_after"][request.window_index]
+        target = data["masked_segment"][request.window_index]
+        
+        method_defs = [
+            ("linear_interpolation", "Linear Interpolation"),
+            ("attention_seq2seq", "Attention Seq2Seq"),
+            ("hybrid", "Hybrid Reconstruction"),
+            ("residual_lstm", "Residual LSTM")
+        ]
+        
+        results: Dict[str, CompareMethodResult] = {}
+        best_method = None
+        best_mse = float("inf")
+        
+        for m_id, m_name in method_defs:
+            is_compat = True
+            reason = "Available"
+            
+            if m_id == "attention_seq2seq" and request.gap_length != 10:
+                is_compat = False
+                reason = "Attention Seq2Seq fixed architecture only supports gap length 10"
+            elif m_id == "hybrid" and request.gap_length != 10:
+                is_compat = False
+                reason = "Hybrid fusion requires gap length 10 (fuses Seq2Seq and Interpolation)"
+            elif m_id == "residual_lstm" and request.gap_length not in [10, 20, 50]:
+                is_compat = False
+                reason = f"Residual LSTM checkpoints only available for gaps 10, 20, 50"
+            
+            if not is_compat:
+                results[m_id] = CompareMethodResult(
+                    method=m_id,
+                    name=m_name,
+                    available=False,
+                    status_message=reason
+                )
+                continue
+            
+            try:
+                t0 = time.perf_counter()
+                rec = model_service.reconstruct(
+                    full_context_before,
+                    full_context_after,
+                    already_normalized=True,
+                    method=m_id,
+                    gap_length=request.gap_length
+                )
+                elapsed_ms = (time.perf_counter() - t0) * 1000.0
+                
+                if rec["status"] == "success":
+                    pred = rec["reconstructed_segment"]
+                    metrics_dict = calculate_metrics(pred, target)
+                    metrics_resp = MetricsResponse(**metrics_dict)
+                    results[m_id] = CompareMethodResult(
+                        method=m_id,
+                        name=m_name,
+                        available=True,
+                        status_message="Verified",
+                        predictions=pred.tolist(),
+                        metrics=metrics_resp,
+                        inference_time_ms=round(elapsed_ms, 2)
+                    )
+                    if metrics_dict["mse"] < best_mse:
+                        best_mse = metrics_dict["mse"]
+                        best_method = m_id
+                else:
+                    results[m_id] = CompareMethodResult(
+                        method=m_id,
+                        name=m_name,
+                        available=False,
+                        status_message=rec.get("error", "Reconstruction failed")
+                    )
+            except Exception as e:
+                results[m_id] = CompareMethodResult(
+                    method=m_id,
+                    name=m_name,
+                    available=False,
+                    status_message=str(e)
+                )
+        
+        cb_out = full_context_before
+        if request.context_before and 0 < request.context_before <= len(full_context_before):
+            cb_out = full_context_before[-request.context_before:]
+            
+        ca_out = full_context_after
+        if request.context_after and 0 < request.context_after <= len(full_context_after):
+            ca_out = full_context_after[:request.context_after]
+        
+        return CompareAllResponse(
+            gap_length=request.gap_length,
+            filename=request.filename,
+            window_index=request.window_index,
+            context_before=cb_out.tolist(),
+            context_after=ca_out.tolist(),
+            ground_truth=target.tolist(),
+            sensor_columns=SENSOR_COLUMNS,
+            methods=results,
+            best_method=best_method
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -667,6 +837,103 @@ def get_gap_evaluation_summary(gap_length: int):
         
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/evaluation/all-summaries")
+def get_all_evaluation_summaries():
+    """Get verified evaluation metrics across all four methods and gap lengths."""
+    try:
+        PROJECT_ROOT = Path(__file__).resolve().parents[4]
+        gap_results_path = PROJECT_ROOT / "experiments" / "gap_length_experiment" / "evaluation_results.json"
+        hybrid_results_path = PROJECT_ROOT / "experiments" / "attention_seq2seq_v2_50epochs" / "hybrid_experiment" / "results.json"
+        
+        gap_data = {}
+        if gap_results_path.exists():
+            with open(gap_results_path, 'r') as f:
+                gap_data = json.load(f)
+                
+        hybrid_data = {}
+        if hybrid_results_path.exists():
+            with open(hybrid_results_path, 'r') as f:
+                hybrid_data = json.load(f)
+                
+        return {
+            "gap_experiments": gap_data,
+            "hybrid_experiment": hybrid_data,
+            "verified_methods": [
+                {
+                    "method": "Linear Interpolation",
+                    "type": "Mathematical baseline",
+                    "mse": 0.007700,
+                    "mae": 0.005572,
+                    "rmse": 0.087748,
+                    "inference_time_ms": 0.02,
+                    "status": "Verified (supports any gap)",
+                    "requires_training": False
+                },
+                {
+                    "method": "Residual LSTM",
+                    "type": "Neural residual model",
+                    "mse": 0.007900,
+                    "mae": 0.006741,
+                    "rmse": 0.088881,
+                    "inference_time_ms": 3.66,
+                    "status": "Verified (gaps 10, 20, 50)",
+                    "requires_training": True
+                },
+                {
+                    "method": "Hybrid Reconstruction",
+                    "type": "Fixed blend (1% neural, 99% interp)",
+                    "mse": 0.007706,
+                    "mae": 0.007008,
+                    "rmse": 0.087785,
+                    "inference_time_ms": 20.10,
+                    "status": "Verified (gap 10 only)",
+                    "requires_training": True
+                },
+                {
+                    "method": "Attention Seq2Seq",
+                    "type": "Autoregressive neural network",
+                    "mse": 0.126779,
+                    "mae": 0.181164,
+                    "rmse": 0.356060,
+                    "inference_time_ms": 19.59,
+                    "status": "Verified (gap 10 only)",
+                    "requires_training": True
+                }
+            ],
+            "gap_length_comparison": [
+                {
+                    "gap_length": 10,
+                    "linear_mse": 0.007700,
+                    "residual_mse": 0.007900,
+                    "diff_percent": "+2.60%",
+                    "better": "Linear Interpolation",
+                    "linear_mae": 0.005572,
+                    "residual_mae": 0.006741
+                },
+                {
+                    "gap_length": 20,
+                    "linear_mse": 0.007654,
+                    "residual_mse": 0.007544,
+                    "diff_percent": "-1.44%",
+                    "better": "Residual LSTM",
+                    "linear_mae": 0.007662,
+                    "residual_mae": 0.009149
+                },
+                {
+                    "gap_length": 50,
+                    "linear_mse": 0.024311,
+                    "residual_mse": 0.023659,
+                    "diff_percent": "-2.68%",
+                    "better": "Residual LSTM",
+                    "linear_mae": 0.022514,
+                    "residual_mae": 0.027200
+                }
+            ]
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
