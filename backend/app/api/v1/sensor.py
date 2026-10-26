@@ -50,6 +50,7 @@ METADATA_COLUMNS = ["time", "Tool", "stage", "Lot", "runnum", "recipe", "recipe_
 
 # Benchmark path
 BENCHMARK_V2_PATH = Path(__file__).resolve().parents[4] / "data" / "benchmark_v2"
+GAP_BENCHMARK_BASE = Path(__file__).resolve().parents[4] / "data" / "gap_length_benchmark"
 RESULTS_PATH = Path(__file__).resolve().parents[4] / "results"
 
 
@@ -61,17 +62,18 @@ class AvailableWindowsResponse(BaseModel):
 class BenchmarkWindowRequest(BaseModel):
     filename: str
     window_index: int
+    method: str = "attention_seq2seq"  # "attention_seq2seq", "residual_lstm", "linear_interpolation", "hybrid"
+    gap_length: int = 10
 
 
 class BenchmarkReconstructionResponse(BaseModel):
     filename: str
     window_index: int
-    neural_predictions: List[List[float]]
-    baseline_predictions: List[List[float]]
+    method: str
+    gap_length: int
+    predictions: List[List[float]]
     ground_truth: List[List[float]]
-    neural_metrics: MetricsResponse
-    baseline_metrics: MetricsResponse
-    better_method: str
+    metrics: MetricsResponse
     sensor_columns: List[str]
 
 
@@ -376,8 +378,35 @@ def list_benchmark_windows():
 
 @router.post("/benchmark/reconstruct-window")
 def reconstruct_benchmark_window(request: BenchmarkWindowRequest):
-    """Reconstruct a specific benchmark window with neural model and baseline."""
+    """Reconstruct a specific benchmark window with selected method."""
     try:
+        # Validate method
+        valid_methods = ["attention_seq2seq", "residual_lstm", "linear_interpolation", "hybrid"]
+        if request.method not in valid_methods:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid method '{request.method}'. Valid methods: {valid_methods}"
+            )
+        
+        # Validate gap length for method
+        if request.method == "attention_seq2seq" and request.gap_length != 10:
+            raise HTTPException(
+                status_code=400,
+                detail="Attention Seq2Seq only supports gap_length=10"
+            )
+        
+        if request.method == "hybrid" and request.gap_length != 10:
+            raise HTTPException(
+                status_code=400,
+                detail="Hybrid reconstruction only supports gap_length=10"
+            )
+        
+        if request.method == "residual_lstm" and request.gap_length not in [10, 20, 50]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Residual LSTM only supports gap_length in [10, 20, 50], got {request.gap_length}"
+            )
+        
         # Load the NPZ file
         file_path = BENCHMARK_V2_PATH / request.filename
         if not file_path.exists():
@@ -398,35 +427,40 @@ def reconstruct_benchmark_window(request: BenchmarkWindowRequest):
         context_after = data["context_after"][request.window_index]    # (50, 17)
         target = data["masked_segment"][request.window_index]         # (10, 17)
         
-        # Neural model reconstruction (data already normalized in benchmark)
-        neural_result = model_service.reconstruct(context_before, context_after, already_normalized=True)
-        if neural_result["status"] != "success":
-            raise HTTPException(status_code=500, detail=neural_result["error"])
+        # For gap length != 10, we need to handle differently
+        if request.gap_length != 10:
+            # For now, only support gap_length=10 with benchmark data
+            # The benchmark was created with 10-timestep gaps
+            raise HTTPException(
+                status_code=400,
+                detail=f"Benchmark data only supports gap_length=10. For other gap lengths, use gap_length_benchmark data."
+            )
         
-        neural_predictions = neural_result["reconstructed_segment"]
-        
-        # Linear interpolation baseline (on normalized data)
-        baseline_predictions = linear_interpolation(
+        # Run reconstruction with selected method
+        result = model_service.reconstruct(
             context_before,
-            context_after
+            context_after,
+            already_normalized=True,
+            method=request.method,
+            gap_length=request.gap_length
         )
         
-        # Calculate metrics
-        neural_metrics = calculate_metrics(neural_predictions, target)
-        baseline_metrics = calculate_metrics(baseline_predictions, target)
+        if result["status"] != "success":
+            raise HTTPException(status_code=500, detail=result["error"])
         
-        # Determine better method
-        better_method = "neural" if neural_metrics["mse"] < baseline_metrics["mse"] else "baseline"
+        predictions = result["reconstructed_segment"]
+        
+        # Calculate metrics
+        metrics = calculate_metrics(predictions, target)
         
         return BenchmarkReconstructionResponse(
             filename=request.filename,
             window_index=request.window_index,
-            neural_predictions=neural_predictions.tolist(),
-            baseline_predictions=baseline_predictions.tolist(),
+            method=request.method,
+            gap_length=request.gap_length,
+            predictions=predictions.tolist(),
             ground_truth=target.tolist(),
-            neural_metrics=MetricsResponse(**neural_metrics),
-            baseline_metrics=MetricsResponse(**baseline_metrics),
-            better_method=better_method,
+            metrics=MetricsResponse(**metrics),
             sensor_columns=SENSOR_COLUMNS
         )
         
@@ -436,7 +470,205 @@ def reconstruct_benchmark_window(request: BenchmarkWindowRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Dataset Exploration Endpoints
+class GapBenchmarkWindowRequest(BaseModel):
+    gap_length: int
+    filename: str
+    window_index: int
+    method: str = "linear_interpolation"  # "linear_interpolation", "residual_lstm"
+
+
+class GapBenchmarkReconstructionResponse(BaseModel):
+    gap_length: int
+    filename: str
+    window_index: int
+    method: str
+    predictions: List[List[float]]
+    ground_truth: List[List[float]]
+    metrics: MetricsResponse
+    sensor_columns: List[str]
+
+
+@router.get("/gap-benchmark/info")
+def get_gap_benchmark_info():
+    """Get information about available gap length benchmarks."""
+    try:
+        gap_lengths = []
+        for gap_dir in GAP_BENCHMARK_BASE.glob("gap_*"):
+            if gap_dir.is_dir():
+                gap_length = int(gap_dir.name.split("_")[1])
+                manifest_path = gap_dir / "manifest.json"
+                
+                if manifest_path.exists():
+                    with open(manifest_path, 'r') as f:
+                        manifest = json.load(f)
+                    
+                    # Count test sequences
+                    test_files = sorted(gap_dir.glob("test_*.npz"))
+                    total_sequences = 0
+                    for test_file in test_files:
+                        data = np.load(test_file)
+                        total_sequences += len(data["context_before"])
+                    
+                    gap_lengths.append({
+                        "gap_length": gap_length,
+                        "context_length": manifest["config"]["context_length"],
+                        "total_sequences": total_sequences,
+                        "test_files": len(test_files)
+                    })
+        
+        return {
+            "available_gap_lengths": sorted(gap_lengths, key=lambda x: x["gap_length"])
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/gap-benchmark/{gap_length}/windows")
+def list_gap_benchmark_windows(gap_length: int):
+    """List available test files for a specific gap length."""
+    try:
+        gap_dir = GAP_BENCHMARK_BASE / f"gap_{gap_length}"
+        if not gap_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Gap length {gap_length} not found")
+        
+        test_files = sorted(gap_dir.glob("test_*.npz"))
+        
+        if not test_files:
+            raise HTTPException(status_code=404, detail="No test files found")
+        
+        windows_info = []
+        for file_path in test_files:
+            data = np.load(file_path)
+            window_count = len(data["context_before"])
+            windows_info.append({
+                "filename": file_path.name,
+                "window_count": int(window_count),
+                "context_shape": data["context_before"].shape,
+                "target_shape": data["masked_segment"].shape
+            })
+        
+        return AvailableWindowsResponse(windows=windows_info)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/gap-benchmark/reconstruct-window")
+def reconstruct_gap_benchmark_window(request: GapBenchmarkWindowRequest):
+    """Reconstruct a window from gap length benchmark."""
+    try:
+        # Validate gap length
+        gap_dir = GAP_BENCHMARK_BASE / f"gap_{request.gap_length}"
+        if not gap_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Gap length {request.gap_length} not found")
+        
+        # Validate method
+        valid_methods = ["linear_interpolation", "attention_seq2seq", "residual_lstm", "hybrid"]
+        if request.method not in valid_methods:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid method '{request.method}'. Valid methods: {valid_methods}"
+            )
+        
+        # Validate gap length for method
+        if request.method == "attention_seq2seq" and request.gap_length != 10:
+            raise HTTPException(
+                status_code=400,
+                detail="Attention Seq2Seq only supports gap_length=10"
+            )
+        
+        if request.method == "hybrid" and request.gap_length != 10:
+            raise HTTPException(
+                status_code=400,
+                detail="Hybrid reconstruction only supports gap_length=10"
+            )
+        
+        # Load the NPZ file
+        file_path = gap_dir / request.filename
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"File {request.filename} not found")
+        
+        data = np.load(file_path)
+        
+        # Validate window index
+        window_count = len(data["context_before"])
+        if request.window_index < 0 or request.window_index >= window_count:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Window index {request.window_index} out of range [0, {window_count})"
+            )
+        
+        # Extract window data (already normalized)
+        context_before = data["context_before"][request.window_index]
+        context_after = data["context_after"][request.window_index]
+        target = data["masked_segment"][request.window_index]
+        
+        # Run reconstruction
+        result = model_service.reconstruct(
+            context_before,
+            context_after,
+            already_normalized=True,
+            method=request.method,
+            gap_length=request.gap_length
+        )
+        
+        if result["status"] != "success":
+            raise HTTPException(status_code=500, detail=result["error"])
+        
+        predictions = result["reconstructed_segment"]
+        
+        # Calculate metrics
+        metrics = calculate_metrics(predictions, target)
+        
+        return GapBenchmarkReconstructionResponse(
+            gap_length=request.gap_length,
+            filename=request.filename,
+            window_index=request.window_index,
+            method=request.method,
+            predictions=predictions.tolist(),
+            ground_truth=target.tolist(),
+            metrics=MetricsResponse(**metrics),
+            sensor_columns=SENSOR_COLUMNS
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/gap-benchmark/{gap_length}/evaluation-summary")
+def get_gap_evaluation_summary(gap_length: int):
+    """Get evaluation summary for a specific gap length from saved results."""
+    try:
+        PROJECT_ROOT = Path(__file__).resolve().parents[4]
+        results_path = PROJECT_ROOT / "experiments" / "gap_length_experiment" / "evaluation_results.json"
+        
+        if not results_path.exists():
+            raise HTTPException(status_code=404, detail="Evaluation results not found")
+        
+        with open(results_path, 'r') as f:
+            all_results = json.load(f)
+        
+        gap_key = str(gap_length)
+        if gap_key not in all_results:
+            raise HTTPException(status_code=404, detail=f"No results for gap length {gap_length}")
+        
+        results = all_results[gap_key]
+        
+        return {
+            "gap_length": gap_length,
+            "overall_normalized": results["overall_normalized"],
+            "overall_original": results["overall_original"],
+            "total_sequences": results["total_sequences"],
+            "per_file_results": results["per_file_results"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/dataset/info", response_model=DatasetInfoResponse)
 def get_dataset_info():
@@ -730,6 +962,63 @@ def get_residual_data(limit: int = 10000):
             "baseline_residuals": baseline_residuals.tolist(),
             "attention_residuals": attention_residuals.tolist(),
             "sensor_columns": SENSOR_COLUMNS
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/model/epoch-comparison")
+def get_epoch_comparison():
+    """Get training results for different epoch counts."""
+    try:
+        PROJECT_ROOT = Path(__file__).resolve().parents[4]
+        history_path = PROJECT_ROOT / "experiments" / "attention_seq2seq_v2_50epochs" / "results" / "training_history.json"
+        
+        if not history_path.exists():
+            raise HTTPException(status_code=404, detail="Training history not found")
+        
+        with open(history_path, 'r') as f:
+            history = json.load(f)
+        
+        training_results = history.get("training_results", {})
+        train_losses = history.get("train_losses", [])
+        val_losses = history.get("val_losses", [])
+        
+        # Extract data at different epoch points
+        epoch_data = []
+        for target_epoch in [20, 30, 40, 50]:
+            if target_epoch <= len(train_losses):
+                epoch_data.append({
+                    "requested_epochs": target_epoch,
+                    "completed_epochs": target_epoch,
+                    "train_loss": train_losses[target_epoch - 1],
+                    "val_loss": val_losses[target_epoch - 1] if target_epoch <= len(val_losses) else None,
+                    "status": "evaluated"
+                })
+            else:
+                epoch_data.append({
+                    "requested_epochs": target_epoch,
+                    "completed_epochs": None,
+                    "train_loss": None,
+                    "val_loss": None,
+                    "status": "not_evaluated"
+                })
+        
+        # Add best epoch info
+        best_epoch = training_results.get("best_epoch")
+        best_val_loss = training_results.get("best_val_loss")
+        
+        return {
+            "best_epoch": best_epoch,
+            "best_val_loss": best_val_loss,
+            "total_epochs": training_results.get("total_epochs"),
+            "total_time": training_results.get("total_time"),
+            "epoch_data": epoch_data,
+            "train_losses": train_losses,
+            "val_losses": val_losses
         }
         
     except HTTPException:

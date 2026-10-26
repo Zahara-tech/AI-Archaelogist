@@ -13,13 +13,15 @@ import sys
 sys.path.append(str(Path(__file__).parent.parent.parent.parent / "src"))
 
 from attention_seq2seq_model import AttentionSeq2SeqReconstructor
+from residual_lstm_model import ResidualLSTM
 
 
 class ModelService:
-    """Service for loading and running the Attention Seq2Seq V2 model."""
+    """Service for loading and running reconstruction models."""
     
     def __init__(self):
-        self.model = None
+        self.model = None  # Attention Seq2Seq
+        self.residual_models = {}  # Residual LSTM models by gap length
         self.scaler = None
         self.sensor_columns = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -27,13 +29,29 @@ class ModelService:
         
         # Paths
         PROJECT_ROOT = Path(__file__).resolve().parents[3]
-        self.model_path = PROJECT_ROOT / "models" / "attention_seq2seq_v2_best_model.pt"
+        self.model_path = PROJECT_ROOT / "experiments" / "attention_seq2seq_v2_50epochs" / "checkpoints" / "best_model.pt"
         self.scaler_path = PROJECT_ROOT / "data" / "benchmark_v2" / "scaler.pkl"
         self.manifest_path = PROJECT_ROOT / "data" / "benchmark_v2" / "manifest.json"
-        self.training_history_path = PROJECT_ROOT / "results" / "attention_seq2seq_v2_training.json"
+        self.training_history_path = PROJECT_ROOT / "experiments" / "attention_seq2seq_v2_50epochs" / "results" / "training_history.json"
+        
+        # Gap length experiment paths
+        self.gap_experiment_path = PROJECT_ROOT / "experiments" / "gap_length_experiment"
+        self.residual_checkpoints = {
+            10: self.gap_experiment_path / "gap_10" / "checkpoints" / "best_model.pt",
+            20: self.gap_experiment_path / "gap_20" / "checkpoints" / "best_model.pt",
+            50: self.gap_experiment_path / "gap_50" / "checkpoints" / "best_model.pt"
+        }
+        
+        # Hybrid experiment path
+        self.hybrid_experiment_path = PROJECT_ROOT / "experiments" / "attention_seq2seq_v2_50epochs" / "hybrid_experiment"
+        self.hybrid_results_path = self.hybrid_experiment_path / "results.json"
+        
+        # Hybrid fusion parameters (from training data)
+        self.hybrid_thresholds = None
+        self.hybrid_fixed_alpha = 0.1  # Default fixed weight
     
     def load_model(self) -> Dict:
-        """Load the trained model and scaler."""
+        """Load the trained Attention Seq2Seq model and scaler."""
         try:
             # Load scaler
             if self.scaler_path.exists():
@@ -51,7 +69,7 @@ class ModelService:
             else:
                 raise FileNotFoundError(f"Manifest not found at {self.manifest_path}")
             
-            # Create model
+            # Create Attention Seq2Seq model (fixed 50-10-50 configuration)
             self.model = AttentionSeq2SeqReconstructor(
                 input_dim=17,
                 hidden_dim=64,
@@ -65,7 +83,10 @@ class ModelService:
             # Load checkpoint
             if self.model_path.exists():
                 checkpoint = torch.load(self.model_path, map_location=self.device)
-                self.model.load_state_dict(checkpoint["model_state_dict"])
+                if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+                    self.model.load_state_dict(checkpoint["model_state_dict"])
+                else:
+                    self.model.load_state_dict(checkpoint)
             else:
                 raise FileNotFoundError(f"Model checkpoint not found at {self.model_path}")
             
@@ -83,6 +104,64 @@ class ModelService:
                 "sensor_columns": self.sensor_columns,
                 "model_path": str(self.model_path),
                 "scaler_path": str(self.scaler_path)
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+    
+    def load_residual_model(self, gap_length: int) -> Dict:
+        """Load a Residual LSTM model for a specific gap length."""
+        try:
+            if gap_length not in self.residual_checkpoints:
+                return {
+                    "status": "error",
+                    "error": f"No checkpoint available for gap length {gap_length}"
+                }
+            
+            checkpoint_path = self.residual_checkpoints[gap_length]
+            if not checkpoint_path.exists():
+                return {
+                    "status": "error",
+                    "error": f"Checkpoint not found at {checkpoint_path}"
+                }
+            
+            # Load scaler if not already loaded
+            if self.scaler is None:
+                if self.scaler_path.exists():
+                    with open(self.scaler_path, "rb") as f:
+                        self.scaler = pickle.load(f)
+                else:
+                    raise FileNotFoundError(f"Scaler not found at {self.scaler_path}")
+            
+            # Create residual model
+            residual_model = ResidualLSTM(
+                input_dim=17,
+                hidden_dim=64,
+                num_layers=2,
+                output_dim=17,
+                output_length=gap_length,
+                dropout=0.2
+            )
+            
+            # Load checkpoint
+            checkpoint = torch.load(checkpoint_path, map_location=self.device)
+            residual_model.load_state_dict(checkpoint["model_state_dict"])
+            residual_model.to(self.device)
+            residual_model.eval()
+            
+            self.residual_models[gap_length] = residual_model
+            
+            param_count = sum(p.numel() for p in residual_model.parameters() if p.requires_grad)
+            
+            return {
+                "status": "loaded",
+                "device": str(self.device),
+                "parameter_count": param_count,
+                "gap_length": gap_length,
+                "checkpoint_path": str(checkpoint_path)
             }
             
         except Exception as e:
@@ -180,26 +259,124 @@ class ModelService:
         self,
         context_before: np.ndarray,
         context_after: np.ndarray,
-        already_normalized: bool = False
+        already_normalized: bool = False,
+        method: str = "attention_seq2seq",
+        gap_length: int = 10
     ) -> Dict:
         """
-        Run reconstruction inference.
+        Run reconstruction inference with specified method.
         
         Args:
             context_before: (context_length, num_sensors) array
             context_after: (context_length, num_sensors) array
             already_normalized: If True, skip scaler transformation (for benchmark data)
+            method: One of "attention_seq2seq", "residual_lstm", "linear_interpolation", "hybrid"
+            gap_length: Length of the gap to reconstruct (for residual LSTM)
             
         Returns:
             Dictionary with reconstructed segment and metadata
         """
+        # Linear interpolation doesn't need model loading
+        if method == "linear_interpolation":
+            return self._linear_interpolation_reconstruct(
+                context_before, context_after, gap_length, already_normalized
+            )
+        
+        # Hybrid reconstruction
+        if method == "hybrid":
+            return self._hybrid_reconstruct(
+                context_before, context_after, gap_length, already_normalized
+            )
+        
+        # Load scaler if needed
+        if self.scaler is None and not already_normalized:
+            if self.scaler_path.exists():
+                with open(self.scaler_path, "rb") as f:
+                    self.scaler = pickle.load(f)
+            else:
+                return {
+                    "status": "error",
+                    "error": f"Scaler not found at {self.scaler_path}"
+                }
+        
+        # Residual LSTM reconstruction
+        if method == "residual_lstm":
+            return self._residual_lstm_reconstruct(
+                context_before, context_after, gap_length, already_normalized
+            )
+        
+        # Attention Seq2Seq reconstruction (default, only supports gap_length=10)
+        if method == "attention_seq2seq":
+            if gap_length != 10:
+                return {
+                    "status": "error",
+                    "error": f"Attention Seq2Seq only supports gap_length=10, got {gap_length}"
+                }
+            return self._attention_seq2seq_reconstruct(
+                context_before, context_after, already_normalized
+            )
+        
+        return {
+            "status": "error",
+            "error": f"Unknown method: {method}"
+        }
+    
+    def _linear_interpolation_reconstruct(
+        self,
+        context_before: np.ndarray,
+        context_after: np.ndarray,
+        gap_length: int,
+        already_normalized: bool
+    ) -> Dict:
+        """Linear interpolation reconstruction."""
+        try:
+            # Normalize if needed
+            if not already_normalized and self.scaler is not None:
+                context_before_norm = self.scaler.transform(context_before)
+                context_after_norm = self.scaler.transform(context_after)
+            else:
+                context_before_norm = context_before
+                context_after_norm = context_after
+            
+            # Linear interpolation
+            left = context_before_norm[-1:, :]
+            right = context_after_norm[0:1, :]
+            steps = np.arange(1, gap_length + 1, dtype=np.float32).reshape(gap_length, 1) / (gap_length + 1)
+            predictions_norm = left + steps * (right - left)
+            
+            # Inverse transform if needed
+            if not already_normalized and self.scaler is not None:
+                predictions_original = self.scaler.inverse_transform(predictions_norm)
+            else:
+                predictions_original = predictions_norm
+            
+            return {
+                "status": "success",
+                "reconstructed_segment": predictions_original,
+                "reconstructed_segment_normalized": predictions_norm,
+                "shape": predictions_original.shape,
+                "method": "linear_interpolation"
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+    
+    def _attention_seq2seq_reconstruct(
+        self,
+        context_before: np.ndarray,
+        context_after: np.ndarray,
+        already_normalized: bool
+    ) -> Dict:
+        """Attention Seq2Seq reconstruction."""
         if not self.model_loaded:
             load_result = self.load_model()
             if load_result["status"] != "loaded":
                 return load_result
         
         try:
-            # Validate input shape
+            # Validate input shape (must be 50-10-50)
             expected_context_shape = (50, 17)
             if context_before.shape != expected_context_shape:
                 raise ValueError(f"context_before must have shape {expected_context_shape}, got {context_before.shape}")
@@ -211,7 +388,6 @@ class ModelService:
                 context_before_norm = context_before
                 context_after_norm = context_after
             else:
-                # Scaler expects 2D input: (n_samples, n_features)
                 context_before_norm = self.scaler.transform(context_before)
                 context_after_norm = self.scaler.transform(context_after)
             
@@ -241,7 +417,134 @@ class ModelService:
                 "status": "success",
                 "reconstructed_segment": predictions_original,
                 "reconstructed_segment_normalized": predictions_norm,
-                "shape": predictions_original.shape
+                "shape": predictions_original.shape,
+                "method": "attention_seq2seq"
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+    
+    def _hybrid_reconstruct(
+        self,
+        context_before: np.ndarray,
+        context_after: np.ndarray,
+        gap_length: int,
+        already_normalized: bool
+    ) -> Dict:
+        """Hybrid reconstruction combining linear interpolation and Attention Seq2Seq."""
+        # Hybrid only supports gap_length=10 (same as Attention Seq2Seq)
+        if gap_length != 10:
+            return {
+                "status": "error",
+                "error": f"Hybrid reconstruction only supports gap_length=10, got {gap_length}"
+            }
+        
+        try:
+            # Get interpolation prediction
+            interp_result = self._linear_interpolation_reconstruct(
+                context_before, context_after, gap_length, already_normalized
+            )
+            if interp_result["status"] != "success":
+                return interp_result
+            
+            # Get Attention Seq2Seq prediction
+            seq2seq_result = self._attention_seq2seq_reconstruct(
+                context_before, context_after, already_normalized
+            )
+            if seq2seq_result["status"] != "success":
+                return seq2seq_result
+            
+            # Fixed-weight blend: alpha * seq2seq + (1 - alpha) * interpolation
+            # Using alpha=0.1 (10% neural, 90% interpolation) based on hybrid experiment
+            alpha = self.hybrid_fixed_alpha
+            predictions_norm = (
+                alpha * seq2seq_result["reconstructed_segment_normalized"] +
+                (1 - alpha) * interp_result["reconstructed_segment_normalized"]
+            )
+            
+            # Inverse transform if needed
+            if not already_normalized and self.scaler is not None:
+                predictions_original = self.scaler.inverse_transform(predictions_norm)
+            else:
+                predictions_original = predictions_norm
+            
+            return {
+                "status": "success",
+                "reconstructed_segment": predictions_original,
+                "reconstructed_segment_normalized": predictions_norm,
+                "shape": predictions_original.shape,
+                "method": "hybrid",
+                "fusion_weight": alpha,
+                "components": {
+                    "interpolation": interp_result["reconstructed_segment_normalized"],
+                    "seq2seq": seq2seq_result["reconstructed_segment_normalized"]
+                }
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+
+    def _residual_lstm_reconstruct(
+        self,
+        context_before: np.ndarray,
+        context_after: np.ndarray,
+        gap_length: int,
+        already_normalized: bool
+    ) -> Dict:
+        """Residual LSTM reconstruction."""
+        # Load residual model if not already loaded
+        if gap_length not in self.residual_models:
+            load_result = self.load_residual_model(gap_length)
+            if load_result["status"] != "loaded":
+                return load_result
+        
+        residual_model = self.residual_models[gap_length]
+        
+        try:
+            # Normalize if needed
+            if not already_normalized and self.scaler is not None:
+                context_before_norm = self.scaler.transform(context_before)
+                context_after_norm = self.scaler.transform(context_after)
+            else:
+                context_before_norm = context_before
+                context_after_norm = context_after
+            
+            # Convert to tensors and add batch dimension
+            context_before_tensor = torch.FloatTensor(context_before_norm).unsqueeze(0).to(self.device)
+            context_after_tensor = torch.FloatTensor(context_after_norm).unsqueeze(0).to(self.device)
+            
+            # Compute linear interpolation
+            left = context_before_tensor[:, -1:, :]
+            right = context_after_tensor[:, 0:1, :]
+            steps = torch.arange(1, gap_length + 1, dtype=torch.float32, device=self.device).reshape(1, gap_length, 1) / (gap_length + 1)
+            interpolation_tensor = left + steps * (right - left)
+            
+            # Predict residual
+            with torch.no_grad():
+                residual_pred = residual_model(context_before_tensor, context_after_tensor, interpolation_tensor)
+            
+            # Final prediction
+            predictions_norm_tensor = interpolation_tensor + residual_pred
+            predictions_norm = predictions_norm_tensor.squeeze(0).cpu().numpy()
+            
+            # Inverse transform if needed
+            if not already_normalized and self.scaler is not None:
+                predictions_original = self.scaler.inverse_transform(predictions_norm)
+            else:
+                predictions_original = predictions_norm
+            
+            return {
+                "status": "success",
+                "reconstructed_segment": predictions_original,
+                "reconstructed_segment_normalized": predictions_norm,
+                "shape": predictions_original.shape,
+                "method": "residual_lstm"
             }
             
         except Exception as e:

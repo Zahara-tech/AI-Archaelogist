@@ -1,0 +1,67 @@
+{
+  "config": {
+    "context_length": 50,
+    "gap_length": 50,
+    "stride": 100
+  },
+  "sensor_columns": [
+    "IONGAUGEPRESSURE",
+    "ETCHBEAMVOLTAGE",
+    "ETCHBEAMCURRENT",
+    "ETCHSUPPRESSORVOLTAGE",
+    "ETCHSUPPRESSORCURRENT",
+    "FLOWCOOLFLOWRATE",
+    "FLOWCOOLPRESSURE",
+    "ETCHGASCHANNEL1READBACK",
+    "ETCHPBNGASREADBACK",
+    "FIXTURETILTANGLE",
+    "ROTATIONSPEED",
+    "ACTUALROTATIONANGLE",
+    "FIXTURESHUTTERPOSITION",
+    "ETCHSOURCEUSAGE",
+    "ETCHAUXSOURCETIMER",
+    "ETCHAUX2SOURCETIMER",
+    "ACTUALSTEPDURATION"
+  ],
+  "files": {
+    "05_M02_DC_train.csv": {
+      "type": "train",
+      "train_sequences": 6966,
+      "val_sequences": 1634,
+      "train_runs": 8804,
+      "val_runs": 2201
+    },
+    "07_M02_DC_train.csv": {
+      "type": "train",
+      "train_sequences": 21512,
+      "val_sequences": 5302,
+      "train_runs": 20005,
+      "val_runs": 5002
+    },
+    "01_M02_DC_test.csv": {
+      "type": "test",
+      "test_sequences": 15400,
+      "test_runs": 1760
+    },
+    "02_M02_DC_test.csv": {
+      "type": "test",
+      "test_sequences": 7522,
+      "test_runs": 6455
+    },
+    "03_M01_DC_test.csv": {
+      "type": "test",
+      "test_sequences": 6846,
+      "test_runs": 4947
+    },
+    "04_M01_DC_test.csv": {
+      "type": "test",
+      "test_sequences": 8650,
+      "test_runs": 8661
+    },
+    "06_M01_DC_test.csv": {
+      "type": "test",
+      "test_sequences": 7065,
+      "test_runs": 6137
+    }
+  }
+}

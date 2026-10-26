@@ -1,21 +1,22 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
-  Database, 
-  FlaskConical, 
-  Cpu, 
   BarChart3,
-  Activity
+  Activity,
+  BookOpen,
+  LayoutDashboard,
+  Brain
 } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
   const location = useLocation();
 
   const navItems = [
-    { path: '/dataset-explorer', label: 'Dataset Explorer', icon: Database },
-    { path: '/reconstruction-lab', label: 'Reconstruction Lab', icon: FlaskConical },
-    { path: '/model-performance', label: 'Model Performance', icon: Cpu },
-    { path: '/experiments', label: 'Experiments & Results', icon: BarChart3 },
+    { path: '/overview', label: 'Overview', icon: LayoutDashboard },
+    { path: '/reconstruction-studio', label: 'Reconstruction Studio', icon: Brain },
+    { path: '/model-performance', label: 'Model Performance', icon: BarChart3 },
+    { path: '/training-experiments', label: 'Training Experiments', icon: Activity },
+    { path: '/about', label: 'About the Project', icon: BookOpen },
   ];
 
   const isActive = (path: string) => location.pathname === path;

@@ -1,10 +1,11 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
-import { DatasetExplorer } from './pages/DatasetExplorer';
-import { ReconstructionLab } from './pages/ReconstructionLab';
-import { ModelPerformance } from './pages/ModelPerformance';
-import { Experiments } from './pages/Experiments';
+import { OverviewNew } from './pages/OverviewNew';
+import { SensorReconstructionDashboard } from './pages/SensorReconstructionDashboard';
+import { ModelPerformanceNew } from './pages/ModelPerformanceNew';
+import { TrainingExperiments } from './pages/TrainingExperiments';
+import { Methodology } from './pages/Methodology';
 
 function App() {
   return (
@@ -15,12 +16,13 @@ function App() {
           <TopBar />
           <main style={{ minHeight: 'calc(100vh - 64px)' }}>
             <Routes>
-              <Route path="/" element={<Navigate to="/dataset-explorer" replace />} />
-              <Route path="/dataset-explorer" element={<DatasetExplorer />} />
-              <Route path="/reconstruction-lab" element={<ReconstructionLab />} />
-              <Route path="/model-performance" element={<ModelPerformance />} />
-              <Route path="/experiments" element={<Experiments />} />
-              <Route path="*" element={<Navigate to="/dataset-explorer" replace />} />
+              <Route path="/" element={<Navigate to="/overview" replace />} />
+              <Route path="/overview" element={<OverviewNew />} />
+              <Route path="/reconstruction-studio" element={<SensorReconstructionDashboard />} />
+              <Route path="/model-performance" element={<ModelPerformanceNew />} />
+              <Route path="/training-experiments" element={<TrainingExperiments />} />
+              <Route path="/about" element={<Methodology />} />
+              <Route path="*" element={<Navigate to="/overview" replace />} />
             </Routes>
           </main>
         </div>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { FlaskConical, Database, AlertTriangle, CheckCircle, Play, BarChart3, TrendingUp, Download, RefreshCw, Filter, Activity, Radar } from 'lucide-react';
+import { FlaskConical, Database, AlertTriangle, BarChart3, TrendingUp, Download, RefreshCw, Filter, Activity, Radar } from 'lucide-react';
 import { api } from '../services/api';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ScatterChart, Scatter, LineChart, Line } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 interface EvaluationMetrics {
   model_name: string;
@@ -22,16 +22,6 @@ interface EvaluationDetails {
   overall: any;
 }
 
-interface ResidualData {
-  sample_count: number;
-  total_samples: number;
-  targets: number[][];
-  baseline_predictions: number[][];
-  attention_predictions: number[][];
-  baseline_residuals: number[][];
-  attention_residuals: number[][];
-  sensor_columns: string[];
-}
 
 type MetricType = 'mse' | 'mae' | 'rmse';
 type ViewMode = 'aggregate' | 'single-gap';
@@ -39,9 +29,7 @@ type ViewMode = 'aggregate' | 'single-gap';
 export const Experiments: React.FC = () => {
   const [evaluationMetrics, setEvaluationMetrics] = useState<EvaluationMetrics | null>(null);
   const [evaluationDetails, setEvaluationDetails] = useState<EvaluationDetails | null>(null);
-  const [residualData, setResidualData] = useState<ResidualData | null>(null);
   const [selectedMetric, setSelectedMetric] = useState<MetricType>('mse');
-  const [selectedModel, setSelectedModel] = useState<string>('all');
   const [viewMode, setViewMode] = useState<ViewMode>('aggregate');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -54,14 +42,12 @@ export const Experiments: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const [metrics, details, residuals] = await Promise.all([
+      const [metrics, details] = await Promise.all([
         api.getEvaluationMetrics().catch(() => null),
-        api.getEvaluationDetails().catch(() => null),
-        api.getResidualData(5000).catch(() => null)
+        api.getEvaluationDetails().catch(() => null)
       ]);
       setEvaluationMetrics(metrics);
       setEvaluationDetails(details);
-      setResidualData(residuals);
     } catch (err) {
       setError('Failed to load evaluation data');
     } finally {
@@ -116,22 +102,6 @@ export const Experiments: React.FC = () => {
     }));
   };
 
-  const prepareResidualData = () => {
-    if (!residualData) return [];
-    const data: any[] = [];
-    const limit = Math.min(1000, residualData.targets.length);
-    for (let i = 0; i < limit; i++) {
-      data.push({
-        index: i,
-        baselineResidual: residualData.baseline_residuals[i][0],
-        attentionResidual: residualData.attention_residuals[i][0],
-        baselinePrediction: residualData.baseline_predictions[i][0],
-        attentionPrediction: residualData.attention_predictions[i][0],
-        actual: residualData.targets[i][0]
-      });
-    }
-    return data;
-  };
 
   const prepareRadarData = () => {
     if (!evaluationMetrics) return [];
@@ -175,7 +145,6 @@ export const Experiments: React.FC = () => {
   }
 
   const barChartData = prepareBarChartData();
-  const residualChartData = prepareResidualData();
   const radarChartData = prepareRadarData();
 
   return (
@@ -315,49 +284,6 @@ export const Experiments: React.FC = () => {
           </div>
         </div>
 
-        {/* Panel B: Residual Analysis */}
-        <div style={{
-          background: 'var(--bg-secondary)',
-          border: '1px solid var(--border-color)',
-          borderRadius: '12px',
-          padding: '1.5rem'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
-            <Activity size={20} color="#22c55e" />
-            <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-              Residual Analysis (Actual - Prediction)
-            </h3>
-          </div>
-          <div style={{ height: '300px' }}>
-            {residualChartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <ScatterChart data={residualChartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
-                  <XAxis dataKey="actual" name="Actual Value" stroke="var(--text-muted)" fontSize={12} />
-                  <YAxis dataKey="baselineResidual" name="Baseline Residual" stroke="var(--text-muted)" fontSize={12} />
-                  <Tooltip
-                    cursor={{ strokeDasharray: '3 3' }}
-                    contentStyle={{
-                      background: 'var(--bg-primary)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '8px',
-                      color: 'var(--text-primary)'
-                    }}
-                  />
-                  <Scatter name="Baseline" fill="#3b82f6" dataKey="baselineResidual" />
-                  <Line type="monotone" dataKey={0} stroke="#ef4444" dot={false} />
-                </ScatterChart>
-              </ResponsiveContainer>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>
-                No residual data available
-              </div>
-            )}
-          </div>
-          <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            Residual = Actual - Prediction. Zero line indicates perfect prediction.
-          </div>
-        </div>
 
         {/* Panel C: Model Performance Radar */}
         <div style={{
